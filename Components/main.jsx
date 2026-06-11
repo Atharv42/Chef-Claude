@@ -1,22 +1,67 @@
 import React from "react";
 import ClaudeRecipe from "./ClaudeRecipe.jsx"
+import RecipeHistory from "./RecipeHistory.jsx";
 import IngredientsInput from "./IngredientsInput.jsx";
 import IngredientsList from "./IngredientsList.jsx";
-import { getRecipeFromHuggingFace } from '/Components/ai.js';
+import { getRecipeFromClaude } from '/Components/ai.js';
+import { loadHistory, saveRecipe } from './recipeHistory.js';
 
 export default function Main() {
   const [ingredients, setIngredients] = React.useState([]);
-
   const [recipeShown, setRecipeShown] = React.useState(false);
+  const [recipeContent, setRecipeContent] = React.useState("");
+  const [isLoading, setIsLoading] = React.useState(false);
+  const [error, setError] = React.useState(null);
+  const [preferences, setPreferences] = React.useState([]);
+  const [history, setHistory] = React.useState(() => loadHistory());
 
-  async function getRecipe(){
-    const RecipeMarkDown = await getRecipeFromHuggingFace(ingredients);
-    console.log(RecipeMarkDown);
+  function togglePreference(pref) {
+    setPreferences(prev =>
+      prev.includes(pref) ? prev.filter(p => p !== pref) : [...prev, pref]
+    );
+  }
+
+  function extractTitle(markdown) {
+    const match = markdown.match(/^#\s+(.+)/m);
+    return match ? match[1].trim() : 'Untitled Recipe';
+  }
+
+  async function getRecipe() {
+    setRecipeContent("");
+    setError(null);
+    setRecipeShown(true);
+    setIsLoading(true);
+    let fullContent = "";
+    try {
+      await getRecipeFromClaude(ingredients, preferences, (chunk) => {
+        setIsLoading(false);
+        fullContent += chunk;
+        setRecipeContent(prev => prev + chunk);
+      });
+      const entry = {
+        id: String(Date.now()),
+        timestamp: Date.now(),
+        title: extractTitle(fullContent),
+        ingredients: [...ingredients],
+        preferences: [...preferences],
+        content: fullContent,
+      };
+      setHistory(saveRecipe(entry));
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  function onSelectHistoryEntry(entry) {
+    setRecipeContent(entry.content);
+    setRecipeShown(true);
   }
 
   const ingredientsListItems = ingredients.map((ingredient) => (
-    <div className="ingredient-container">
-      <li key={ingredient}>{ingredient}</li>
+    <div key={ingredient} className="ingredient-container">
+      <li>{ingredient}</li>
       <button onClick={remove} className="removebtn">
         x
       </button>
@@ -33,17 +78,23 @@ export default function Main() {
     setIngredients((prevIngredients) =>
       prevIngredients.filter((ingredient) => ingredient !== itemToRemove)
     );
-    event.target.parentElement.removeChild();
   }
 
   return (
     <main>
         <IngredientsInput addIngredient={addIngredient} />
 
-        <IngredientsList ingredientsListItems={ingredientsListItems} getRecipe={getRecipe} ingredients={ingredients}/>
-        
-        {recipeShown && <ClaudeRecipe />}
+        <IngredientsList
+            ingredientsListItems={ingredientsListItems}
+            getRecipe={getRecipe}
+            ingredients={ingredients}
+            preferences={preferences}
+            togglePreference={togglePreference}
+        />
+
+        {recipeShown && <ClaudeRecipe recipeContent={recipeContent} isLoading={isLoading} error={error} />}
+        <RecipeHistory history={history} onSelect={onSelectHistoryEntry} />
     </main>
   );
-  
+
 }

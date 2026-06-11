@@ -1,101 +1,68 @@
-// import Anthropic from "@anthropic-ai/sdk";
-// import { HfInference } from "@huggingface/inference";
+const SYSTEM_PROMPT = `You are an expert chef and culinary instructor with decades of experience in cuisines from around the world. When given a list of ingredients, suggest a single creative, delicious, and practical recipe a home cook can realistically prepare.
 
-// const SYSTEM_PROMPT = `
-// You are an assistant that receives a list of ingredients that a user has and suggests a recipe they could make with some or all of those ingredients. You don't need to use every ingredient they mention in your recipe. The recipe can include additional ingredients they didn't mention, but try not to include too many extra ingredients. Format your response in markdown to make it easier to render to a web page
-// `;
+Respond in markdown using exactly this structure:
 
-// const ANTHROPIC_MODEL = import.meta.env.ANTHROPIC_MODEL || "claude-3-haiku-20240307";
-// const HF_MODEL = import.meta.env.HF_MODEL || "mistralai/Mixtral-8x7B-Instruct-v0.1";
+# [Recipe Name]
+A brief, enticing one or two sentence description.
 
-// const anthropic = new Anthropic({
-//     apiKey: import.meta.env.ANTHROPIC_API_KEY, // Ensure this is server-side
-//     dangerouslyAllowBrowser: true
-// });
+## Ingredients Used
+- List only the provided ingredients that the recipe actually needs, with rough quantities.
 
-// const hf = new HfInference(import.meta.env.VITE_HF_ACCESS_TOKEN);
+## Instructions
+1. Clear, numbered steps a home cook can follow.
 
-// export async function getRecipeFromChefClaude(ingredientsArr) {
-//     if (!Array.isArray(ingredientsArr) || ingredientsArr.length === 0) {
-//         throw new Error("Ingredients must be a non-empty array.");
-//     }
-//     const ingredientsString = ingredientsArr.map(String).join(", ");
-//     try {
-//         const msg = await anthropic.messages.create({
-//   model: ANTHROPIC_MODEL,
-//   max_tokens: 1024,
-//   system: SYSTEM_PROMPT,
-//   messages: [
-//     { role: "user", content: `I have ${ingredientsString}. Please give me a recipe you'd recommend I make!` }
-//   ],
-// });
-//         return msg.content[0].text;
-//     } catch (err) {
-//         console.error("Error in getRecipeFromChefClaude:", );
-//         throw err
-//     }
-// }
+## Chef's Tip
+One short tip or variation (optional but encouraged).`;
 
-// export async function getRecipeFromMistral(ingredientsArr) {
-//     if (!Array.isArray(ingredientsArr) || ingredientsArr.length === 0) {
-//         throw new Error("Ingredients must be a non-empty array.");
-//     }
-//     const ingredientsString = ingredientsArr.map(String).join(", ");
-//     try {
-//         const response = await hf.chatCompletion({
-//             model: VITE_HF_MODEL,
-//             messages: [
-//                 { role: "system", content: SYSTEM_PROMPT },
-//                 { role: "user", content: `I have ${ingredientsString}. Please give me a recipe you'd recommend I make!` },
-//             ],
-//             max_tokens: 1024,
-//         });
-//         return response.choices[0].message.content;
-//     } catch (err) {
-//     console.error("Error in getRecipeFromMistral:", err); // log full error
-//     throw new Error("Failed to fetch recipe from Mistral. Please try again later.");
-// }
-// }
+export async function getRecipeFromClaude(ingredients, preferences, onChunk) {
+  const ingredientList = ingredients.join(', ');
+  const prefNote = preferences.length > 0
+    ? ` Dietary requirements (strictly follow all of these): ${preferences.join(', ')}.`
+    : '';
 
+  const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${import.meta.env.VITE_GROQ_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: 'llama-3.3-70b-versatile',
+      max_tokens: 1024,
+      stream: true,
+      messages: [
+        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'user', content: `I have these ingredients: ${ingredientList}. What should I make?${prefNote}` },
+      ],
+    }),
+  });
 
-import { InferenceClient } from "@huggingface/inference";
- let HfInference = InferenceClient;
-
-const HF_API_KEY = import.meta.env.VITE_HF_ACCESS_TOKEN;
-const HF_MODEL = import.meta.env.VITE_HF_MODEL || "mistralai/Mixtral-8x7B-Instruct-v0.1";
-
-const hf = new HfInference(HF_API_KEY);
-
-export async function getRecipeFromHuggingFace(ingredientsArr) {
-  if (!Array.isArray(ingredientsArr) || ingredientsArr.length === 0) {
-    throw new Error("Ingredients must be a non-empty array.");
+  if (response.status === 401) {
+    throw new Error('Invalid API key — check your VITE_GROQ_API_KEY in .env');
+  }
+  if (response.status === 429) {
+    throw new Error('Rate limit reached — please wait a moment and try again.');
+  }
+  if (!response.ok) {
+    throw new Error(`Request failed (${response.status}) — please try again.`);
   }
 
-  const ingredientString = ingredientsArr.join(", ");
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
 
-  const SYSTEM_PROMPT = `
-You are an assistant that receives a list of ingredients that a user has and suggests a recipe they could make. 
-You don't need to use every ingredient. Try to keep extra ingredients minimal. Return the recipe in markdown format.
-
-User: I have ${ingredientsArr.join(", ")}. What should I make?
-`;
-
-  try {
-    const result = await hf.chatCompletion({
-      model: HF_MODEL,
-      messages: [
-        { role: "system", content: SYSTEM_PROMPT },
-        { role: "user", content: `I have ${ingredientString}. What can I make?` },
-      ],
-      parameters: {
-        max_tokens: 512,
-        temperature: 0.7,
-      },
-    });
-
-    return response.choices[0].message.content;
-  } catch (err) {
-    console.error("Error in getRecipeFromHuggingFace:", err);
-    throw new Error("Failed to fetch recipe from Hugging Face.");
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    for (const line of decoder.decode(value).split('\n')) {
+      if (!line.startsWith('data: ')) continue;
+      const data = line.slice(6).trim();
+      if (data === '[DONE]') return;
+      try {
+        const text = JSON.parse(data).choices?.[0]?.delta?.content;
+        if (text) onChunk(text);
+      } catch {
+        // skip malformed SSE lines
+      }
+    }
   }
 }
