@@ -1,6 +1,6 @@
 # Chef Claude
 
-An AI-powered recipe generator built with React 19 and Vite. Add the ingredients you have on hand, apply optional dietary filters, and get a complete recipe suggestion in seconds — streamed in word by word.
+An AI-powered recipe generator built with React 19 and Vite, powered by **Llama 3.3-70B via Groq**. Add the ingredients you have on hand, apply optional dietary filters (Vegetarian, Vegan, Gluten-Free, High Protein, Quick), and get a complete recipe suggestion streamed back word by word — free, fast, and no credit card required.
 
 ---
 
@@ -96,8 +96,8 @@ Open [http://localhost:5173](http://localhost:5173).
 1. User types an ingredient and submits → `addIngredient()` appends it to the `ingredients` state array
 2. Once 4+ ingredients are added, dietary preference chips and the "Get a Recipe" button appear
 3. User optionally toggles preferences (each toggles an entry in the `preferences` array)
-4. Clicking "Get a Recipe" calls `getRecipeFromClaude(ingredients, preferences, onChunk)` in `ai.js`
-5. `ai.js` sends a `POST` to `https://api.groq.com/openai/v1/chat/completions` with `stream: true`
+4. Clicking "Get a Recipe" calls `getRecipeFromClaude()` in `ai.js` (the function name is a legacy internal name; the actual provider is Groq)
+5. `ai.js` sends a `POST` to `https://api.groq.com/openai/v1/chat/completions` with `model: llama-3.3-70b-versatile` and `stream: true`
 6. The response body is read chunk by chunk via `response.body.getReader()`
 7. Each chunk is decoded, split on `\n`, and lines starting with `data: ` are JSON-parsed for `choices[0].delta.content`
 8. Each text delta fires the `onChunk` callback → `setRecipeContent(prev => prev + chunk)` updates state

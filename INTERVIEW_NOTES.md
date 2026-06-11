@@ -26,7 +26,7 @@ Use this as a study guide before any frontend, React, or full-stack interview.
 
 **30-second pitch for an interviewer:**
 
-> "Chef Claude is a React 19 + Vite single-page app that lets users enter ingredients they have at home, optionally apply dietary filters like Vegetarian or Gluten-Free, and get an AI-generated recipe. The response streams in word by word using the Fetch Streams API and SSE. It persists the last 5 recipes in localStorage with timestamps so users can browse and reload past results. I built it to practice integrating a real LLM API, implementing streaming UI, and managing several pieces of async state at once."
+> "Chef Claude is a React 19 + Vite single-page app powered by Llama 3.3-70B via Groq's free inference API. Users enter ingredients, optionally apply dietary filters like Vegetarian or Gluten-Free, and get a recipe streamed back word by word using the Fetch Streams API and Server-Sent Events. It persists the last 5 recipes in localStorage so users can browse and reload past results instantly without a new API call. I built it to practice real LLM API integration, streaming UI patterns, and managing several async state pieces at once — and I ran into real debugging challenges along the way, like hitting rate limits on Gemini's free tier and diagnosing an invalid API key through the network tab."
 
 ---
 
@@ -62,7 +62,8 @@ User clicks "Get a Recipe"
   → getRecipe() in main.jsx
       → setRecipeContent(""), setError(null), setIsLoading(true)
       → calls getRecipeFromClaude(ingredients, preferences, onChunk)
-          → ai.js: POST to Groq API with stream: true
+          → ai.js: POST to https://api.groq.com/openai/v1/chat/completions
+             model: llama-3.3-70b-versatile, stream: true
           → reads response.body with getReader()
           → each SSE line → JSON.parse → delta.content → onChunk(text)
       → onChunk fires:
@@ -436,13 +437,17 @@ The key design: errors set `error` state, they don't `console.error` and disappe
 
 ---
 
-### The Anthropic 401 invalid key
+### The 401 invalid key (during Anthropic phase)
 
-**Symptom:** `"invalid x-api-key"` from Anthropic.
+**Symptom:** `"invalid x-api-key"` — the API was reachable but the key was rejected.
 
-**Root cause:** `.env` had a placeholder or the wrong key. The Anthropic SDK was correctly reading `VITE_ANTHROPIC_API_KEY` and sending it, but the value was invalid.
+**Root cause:** `.env` had a placeholder value. The SDK was correctly reading `VITE_ANTHROPIC_API_KEY` and sending it, but the value was `your_anthropic_api_key_here` — never filled in.
 
-**Lesson:** Browser DevTools → Network tab → click the failed request → Headers → look at `x-api-key`. If it's `your_anthropic_api_key_here`, the `.env` file was never filled in. Always verify env vars are loaded by checking the actual request in the network tab.
+**How we debugged it:** Browser DevTools → Network tab → clicked the failed request → Headers → saw the literal placeholder string being sent as the key. The env var was present but empty of real data.
+
+**Resolution:** Filled in the real key. Later switched away from Anthropic entirely to Groq (free tier, no billing required) as the production AI provider.
+
+**Lesson:** When you see a 401, go straight to the network tab and inspect what value is actually being sent — not what you think is in `.env`. Also: always choose a provider that doesn't require billing setup for a dev/portfolio project.
 
 ---
 
@@ -512,5 +517,10 @@ const response = await fetch(url, { signal: controller.signal, ...options });
 | **localStorage** | Browser key-value store, survives page refresh, ~5MB limit, per-origin |
 | **`aria-live`** | Accessibility attribute that tells screen readers to announce content changes |
 | **`key` prop** | React's hint for list reconciliation — must be on the direct `.map()` child |
-| **`dangerouslyAllowBrowser`** | Anthropic SDK flag acknowledging you know the API key is exposed in the browser |
 | **`try/catch/finally`** | Error handling block; `finally` always runs regardless of success or failure |
+| **Groq** | AI inference company running open-source models (Llama, Mixtral) on custom LPU hardware — not an AI lab |
+| **LPU** | Language Processing Unit — Groq's custom chip optimised for sequential token generation, 5–10× faster than GPU inference |
+| **OpenAI-compatible API** | An endpoint that mirrors OpenAI's request/response shape so any OpenAI client works with it unchanged |
+| **`gsk_`** | Groq API key prefix — if your key doesn't start with this, it's the wrong key |
+| **`data: [DONE]`** | The final SSE line sent by OpenAI-compatible streaming APIs to signal the stream has ended |
+| **`TextDecoder`** | Browser API that converts a `Uint8Array` (raw bytes) to a UTF-8 string for processing SSE lines |
